@@ -1,4 +1,5 @@
 #!/bin/bash
 
 # This is a binary file to run node index.js
-node index.js
+DIR="$(dirname "$0")/../.."
+node "${DIR}/node_modules/serve-cove/index.js" "$@"
