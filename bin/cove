@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# This is a binary file to run node index.js
+node index.js
