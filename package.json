@@ -1,0 +1,22 @@
+{
+  "name": "cove",
+  "version": "0.0.1",
+  "description": "A single npm-based package that, once installed, can be executed to serve files and provide a JSON index under token-based authorization.",
+  "main": "index.js",
+  "bin": {
+    "serve": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "serve": "node index.js"
+  },
+  "repository": "https://github.com/Abilityai/cove.git",
+  "author": "Alex Osipenko <alex@ability.ai>",
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "minimist": "^1.2.8"
+  }
+}

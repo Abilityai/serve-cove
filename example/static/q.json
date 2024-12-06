@@ -1,0 +1,15 @@
+{
+    "name": "John Doe",
+    "age": 30,
+    "email": "johndoe@example.com",
+    "address": {
+        "street": "123 Main St",
+        "city": "Anytown",
+        "postalCode": "12345"
+    },
+    "phoneNumbers": [
+        "123-456-7890",
+        "987-654-3210"
+    ],
+    "active": true
+}
