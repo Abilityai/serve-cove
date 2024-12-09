@@ -31,13 +31,13 @@ const generateFileIndex = (dir) => {
       const content = fs.readFileSync(fullPath, 'utf8');
       const firstLine = content.split('\n')[0].replace(/^#\s*/, '');
       files.push({
-        name: path.relative(PROMPTS_DIR, fullPath).replace(/\\/g, '/'),
+        name: path.relative(dir, fullPath).replace(/\\/g, '/'),
         description: firstLine,
         url: `/${path.relative(PROMPTS_DIR, fullPath).replace(/\\/g, '/')}`
       });
     }
   });
-  return files;
+  return files.filter(file => file);
 };
 
 app.get('/', (req, res) => {
@@ -66,6 +66,18 @@ app.get('/favicon.ico', (req, res) => {
 
 app.get('*', (req, res) => {
   const filePath = path.join(PROMPTS_DIR, req.path);
+
+  // Check if path is a directory
+  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isDirectory()) {
+    if (!checkAuth(req)) {
+      console.log(`Unauthorized access attempt to directory ${req.path}`);
+      return res.status(401).send('Unauthorized');
+    }
+    console.log(`Authorized access to directory ${req.path}`);
+    const index = generateFileIndex(filePath);
+    return res.json({ files: index });
+  }
+
   fs.access(filePath, fs.constants.R_OK, (err) => {
     if (err) {
       // Check if the file exists in the static dir, serve without auth if it does
