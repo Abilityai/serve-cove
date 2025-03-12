@@ -1,6 +1,6 @@
 {
   "name": "serve-cove",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A single npm-based package that, once installed, can be executed to serve files and provide a JSON index under token-based authorization.",
   "main": "index.js",
   "type": "module",
