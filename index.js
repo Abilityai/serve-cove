@@ -1,107 +1,164 @@
-require('dotenv').config();
+import dotenv from 'dotenv';
+dotenv.config();
 
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-
-const minimist = require('minimist');
-
-const app = express();
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import {
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import express from 'express';
+import minimist from 'minimist';
+import resourcesScanner from './resources.js';
+import cors from 'cors';
+import crypto from 'crypto';
 
 const args = minimist(process.argv.slice(2));
 const PORT = args.port || process.env.PORT || 8080;
 const TOKENS = args.tokens ? args.tokens.split(',') : (process.env.TOKENS ? process.env.TOKENS.split(',') : []);
-const PROMPTS_DIR = args.promptsDir || process.env.PROMPTS_DIR || 'prompts';
-const STATIC_DIR = args.staticDir || process.env.STATIC_DIR || 'static';
+const RESOURCES_DIR = args.resourcesDir || process.env.RESOURCES_DIR || 'example';
 
-const checkAuth = (req) => {
-  const token = req.query.u || req.query.token || req.get('Authorization');
-  console.log({token, TOKENS})
-  return TOKENS.includes(token);
-};
-
-const generateFileIndex = (dir) => {
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  let files = [];
-  entries.forEach(entry => {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files = files.concat(generateFileIndex(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      const content = fs.readFileSync(fullPath, 'utf8');
-      const firstLine = content.split('\n')[0].replace(/^#\s*/, '');
-      files.push({
-        name: path.relative(dir, fullPath).replace(/\\/g, '/'),
-        description: firstLine,
-        url: `/${path.relative(PROMPTS_DIR, fullPath).replace(/\\/g, '/')}`
-      });
-    }
+// Create Express app
+const app = express();
+app.use(cors());
+app.use((req, res, next) => {
+  console.log(`[INI] ${req.method} ${req.path} - ${new Date().toISOString()}`);
+  res.on('finish', () => {
+    console.log(`[INI] ${req.method} ${req.path} - Status: ${res.statusCode}`);
   });
-  return files.filter(file => file);
-};
+  next();
+});
 
-app.get('/', (req, res) => {
-  if (!checkAuth(req)) {
-    console.log('Unauthorized access attempt to /');
-    return res.status(401).send('Unauthorized');
+
+// Store active transports (in a real application, you might want to use a more robust solution)
+const activeTransports = new Map();
+// Store loaded resources
+let loadedResources = [];
+
+// Token authentication middleware
+const server = new Server(
+  {
+    name: "resource-server",
+    version: "1.0.0"
+  },
+  {
+    capabilities: {
+      resources: {}
+    }
   }
-  console.log('Authorized access to /');
-  const index = generateFileIndex(PROMPTS_DIR);
-  res.json({ files: index });
+);
+
+// Load resources initially
+async function loadResources() {
+  try {
+    console.log(`[RES] Loading resources from directory: ${RESOURCES_DIR}`);
+    loadedResources = await resourcesScanner(RESOURCES_DIR);
+    console.log(`[RES] Loaded ${loadedResources.length} resources`);
+  } catch (error) {
+    console.error('[RES] Error loading resources:', error);
+  }
+}
+
+// Handle listing all resources
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  console.log('[RES] Handling ListResources request');
+  const resources = loadedResources.map(({ uri, name, description, mimeType }) => ({
+    uri,
+    name,
+    mimeType
+  }));
+
+  console.log('[RES] Returning resources:', resources);
+
+  return { resources };
 });
 
-app.use(express.static(STATIC_DIR));
-
-app.get('/favicon.ico', (req, res) => {
-  const staticFaviconPath = path.join(STATIC_DIR, 'favicon.ico');
-  fs.access(staticFaviconPath, fs.constants.R_OK, (err) => {
-    if (!err) {
-      console.log('Serving favicon from static directory');
-      return res.sendFile(path.resolve(staticFaviconPath));
-    }
-    console.log('Favicon not found in static directory, serving fallback from root');
-    res.sendFile(path.resolve('favicon.ico'));
-  });
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return {
+    resourceTemplates: []
+  };
 });
 
-app.get('*', (req, res) => {
-  const filePath = path.join(PROMPTS_DIR, req.path);
+// Handle getting a specific resource
+server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
+  const resourceUri = params.uri;
+  const resource = loadedResources.find(({ uri }) => uri === resourceUri);
+  if (!resource) {
+    throw new Error(`Unknown resource: ${resourceUri}`);
+  }
+  console.log('[RES] Returning resource:', resource);
+  return {
+    contents: [{
+      uri: resource.uri,
+      mimeType: resource.mimeType,
+      text: resource.content
+    }]
+  };
+});
 
-  // Check if path is a directory
-  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isDirectory()) {
-    if (!checkAuth(req)) {
-      console.log(`Unauthorized access attempt to directory ${req.path}`);
-      return res.status(401).send('Unauthorized');
-    }
-    console.log(`Authorized access to directory ${req.path}`);
-    const index = generateFileIndex(filePath);
-    return res.json({ files: index });
+app.get("/:token/mcp", async (req, res) => {
+  const token = req.params.token;
+  if (!TOKENS.includes(token)) {
+    throw new Error(`Invalid token: ${token}`);
   }
 
-  fs.access(filePath, fs.constants.R_OK, (err) => {
-    if (err) {
-      // Check if the file exists in the static dir, serve without auth if it does
-      const staticFilePath = path.join(STATIC_DIR, req.path);
-      fs.access(staticFilePath, fs.constants.R_OK, (staticErr) => {
-        if (staticErr) {
-          console.log(`File not found: ${req.path}`);
-          return res.status(404).send('Not Found');
-        }
-        console.log(`Serving static file without auth: ${req.path}`);
-        res.sendFile(path.resolve(staticFilePath));
-      });
-      return;
-    }
-    // Authorization required for main prompt files
-    if (!checkAuth(req)) {
-      console.log(`Unauthorized access attempt to ${req.path}`);
-      return res.status(401).send('Unauthorized');
-    }
-    console.log(`Authorized access to ${req.path}`);
-    res.sendFile(path.resolve(filePath));
+  const uid = crypto.randomUUID();
+  console.log(`[MCP] New MCP connection with session ID: ${uid}`);
+
+  const transport = new SSEServerTransport(`/${token}/mcp/messages/${uid}`, res);
+  activeTransports.set(uid, transport);
+  // Set up cleanup on connection close
+  res.on('close', () => {
+    console.log(`[MCP] SSE connection closed for session: ${uid}`);
+    activeTransports.delete(uid);
   });
+
+  try {
+    await server.connect(transport);
+    console.log(`[MCP] Server connected to transport for session: ${uid}`);
+  } catch (error) {
+    console.error(`[MCP] Error connecting to transport: ${error.message}`);
+    activeTransports.delete(uid);
+    res.status(500).send(`Connection error: ${error.message}`);
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+// Handle client-to-server messages
+app.post("/:token/mcp/messages/:uid", async (req, res) => {
+  const token = req.params.token;
+
+  if (!TOKENS.includes(token)) {
+    console.log(`[MSG] Invalid token: ${token}`);
+    res.status(401).send("Invalid token");
+    return;
+  }
+
+  const uid = req.params.uid;
+  console.log(`[MSG] Handling POST message for token: ${uid}`);
+  const transport = activeTransports.get(uid);
+  if (!transport) {
+    console.log(`[MSG] No active connection found for this token: ${uid}`);
+    res.status(400).send("No active connection found for this token");
+    return;
+  }
+
+  try {
+    await transport.handlePostMessage(req, res);
+    console.log(`[MSG] POST message handled for token: ${uid}`);
+  } catch (error) {
+    console.error(`[MSG] Error handling POST message: ${error.message}`);
+    res.status(500).send(`Error: ${error.message}`);
+  }
 });
+
+// Start the server
+(async () => {
+  // Load resources before starting the server
+  await loadResources();
+
+  app.listen(PORT, () => {
+    console.log(`[INI] MCP server running on port ${PORT}`);
+    console.log(`[INI] Tokens configured: ${TOKENS.length > 0 ? TOKENS.join(', ') : 'None'}`);
+  });
+})();

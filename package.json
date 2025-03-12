@@ -3,6 +3,7 @@
   "version": "0.0.4",
   "description": "A single npm-based package that, once installed, can be executed to serve files and provide a JSON index under token-based authorization.",
   "main": "index.js",
+  "type": "module",
   "bin": {
     "cove": "./bin/cove"
   },
@@ -14,8 +15,15 @@
   "license": "MIT",
   "private": false,
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "js-yaml": "^4.1.0",
     "minimist": "^1.2.8"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.6.0"
   }
 }
